@@ -1,8 +1,5 @@
 import React, { useMemo, useState, useRef, useCallback } from 'react';
-import {
-  View, Text, StyleSheet, Pressable, FlatList, Animated,
-  PanResponder, LayoutChangeEvent,
-} from 'react-native';
+import { View, Text, StyleSheet, Pressable, FlatList, Animated, PanResponder, LayoutChangeEvent } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useFocusEffect } from '@react-navigation/native';
 
@@ -20,10 +17,7 @@ const DRAG_ZONE_H = 24;
 const DRAG_TRIGGER = 28;
 
 const daysInMonth = (y: number, m: number) => new Date(y, m + 1, 0).getDate();
-const isSameYMD = (a: Date, b: Date) =>
-  a.getFullYear() === b.getFullYear() &&
-  a.getMonth() === b.getMonth() &&
-  a.getDate() === b.getDate();
+const isSameYMD = (a: Date, b: Date) => a.getFullYear() === b.getFullYear() && a.getMonth() === b.getMonth() && a.getDate() === b.getDate();
 
 function useMonthMatrix(year: number, month: number) {
   return useMemo<Cell[]>(() => {
@@ -32,12 +26,18 @@ function useMonthMatrix(year: number, month: number) {
     const prevDays = daysInMonth(year, month - 1);
 
     const cells: Cell[] = [];
+
+    // 이전 달
     for (let i = firstDow - 1; i >= 0; i--) {
       cells.push({ date: new Date(year, month - 1, prevDays - i), inMonth: false });
     }
+
+    // 이번 달
     for (let d = 1; d <= curDays; d++) {
       cells.push({ date: new Date(year, month, d), inMonth: true });
     }
+
+    // 다음 달로 채워 42칸
     let next = 1;
     while (cells.length < ROWS * COLS) {
       cells.push({ date: new Date(year, month + 1, next++), inMonth: false });
@@ -64,14 +64,12 @@ function useWeekCells(baseDate: Date, cursorY: number, cursorM: number) {
 export default function CalendarScreen() {
   const today = new Date();
 
-  // 최초 선택 날짜 = 오늘
+  // 최초 월간 모드, 최초 선택 날짜 = 오늘
+  const [isWeekly, setIsWeekly] = useState(false);
   const [selected, setSelected] = useState<Date>(() => new Date());
 
   // 현재 보이는 달 커서
-  const [cursor, setCursor] = useState(() => ({
-    y: today.getFullYear(),
-    m: today.getMonth(),
-  }));
+  const [cursor, setCursor] = useState(() => ({ y: today.getFullYear(), m: today.getMonth() }));
 
   // 화면 마운트시 날짜 초기화
   useFocusEffect(
@@ -82,8 +80,19 @@ export default function CalendarScreen() {
     }, [])
   );
 
-  const monthCells = useMonthMatrix(cursor.y, cursor.m);
-  const weekCells = useWeekCells(selected, cursor.y, cursor.m);
+  // selected에서 년/월 파생
+  const monthYear = useMemo(
+    () => ({
+      y: selected.getFullYear(),
+      m: selected.getMonth(),
+    }),
+    [selected],
+  );
+
+  // monthCells selected 기준으로 생성
+  const monthCells = useMonthMatrix(monthYear.y, monthYear.m);
+  // 주간달력 월 selected 달로 통일
+  const weekCells = useWeekCells(selected, monthYear.y, monthYear.m);
 
   // 월간 그리드에서 선택일의 행
   const selectedIndex = useMemo(() => {
@@ -93,9 +102,7 @@ export default function CalendarScreen() {
   const selectedRow = Math.floor(selectedIndex / COLS);
 
   // 전환 애니메이션
-  const progress = useRef(new Animated.Value(0)).current;
-  const [isWeekly, setIsWeekly] = useState(false);
-
+  const progress = useRef(new Animated.Value(0)).current; // 0=월간, 1=주간
   const gridHeight = progress.interpolate({
     inputRange: [0, 1],
     outputRange: [ROWS * ROW_HEIGHT, ROW_HEIGHT],
@@ -108,75 +115,73 @@ export default function CalendarScreen() {
     extrapolate: 'clamp',
   });
 
-  const anchorDateForWeekly = () => new Date(cursor.y, cursor.m, 1);
+  // 특정 (y,m)로 이동 + 1일
+  const gotoMonth = (y: number, m: number) => {
+    setCursor({ y, m });
+    setSelected(new Date(y, m, 1)); // 해당 달의 1일 선택
+  };
 
   // 모드 전환
   const animateTo = (toValue: 0 | 1) => {
-    Animated.timing(progress, { toValue, duration: 220, useNativeDriver: false })
-    .start(() => {
-      if (toValue === 1) {
-        // 월간 -> 주간 : 해당 달 1일이 포함된 '첫째 주'부터
-          const base = anchorDateForWeekly();
-          setSelected(base); // 주간은 selected를 기준으로 그림
-          setCursor({ y: base.getFullYear(), m: base.getMonth() });
-        } else {
-          // 주간 -> 월간 : 현재 선택일의 달을 보이게
-          const base = selected;
-          setCursor({ y: base.getFullYear(), m: base.getMonth() });
-        }
-        setIsWeekly(toValue === 1);
-      });
+    const base = selected; // 기준 = 선택된 날짜
+    setCursor({ y: base.getFullYear(), m: base.getMonth() }); // 그 달부터 보이게
+    Animated.timing(progress, { toValue, duration: 220, useNativeDriver: false }).start(() => setIsWeekly(toValue === 1));
   };
 
   // 스와이프 핸들
   const panResponder = useRef(
     PanResponder.create({
-      onMoveShouldSetPanResponder: (_: any, g: any) =>
-        Math.abs(g.dy) > 8 && Math.abs(g.dy) > Math.abs(g.dx),
-
+      onMoveShouldSetPanResponder: (_: any, g: any) => Math.abs(g.dy) > 8 && Math.abs(g.dy) > Math.abs(g.dx),
       onPanResponderRelease: (_: any, g: any) => {
         if (g.dy < -DRAG_TRIGGER) animateTo(1);
         else if (g.dy > DRAG_TRIGGER) animateTo(0);
         else progress.stopAnimation((v: any) => animateTo(v > 0.5 ? 1 : 0));
       },
-
       onPanResponderTerminate: (_: any, g: any) => {
         if (g.dy < -DRAG_TRIGGER) animateTo(1);
         else if (g.dy > DRAG_TRIGGER) animateTo(0);
         else progress.stopAnimation((v: any) => animateTo(v > 0.5 ? 1 : 0));
       },
-    })
+    }),
   ).current;
 
   // pre, next 이동
   const goPrev = () => {
     if (isWeekly) {
+      // 주간 (선택일-7일)
       const d = new Date(selected);
       d.setDate(d.getDate() - 7);
       setSelected(d);
       setCursor({ y: d.getFullYear(), m: d.getMonth() });
     } else {
-      setCursor(({ y, m }) => ({ y: y + (m - 1 < 0 ? -1 : 0), m: (m + 11) % 12 }));
+      // 월간 (이전 달로 가며 해당 달 1일 선택)
+      const prevM = cursor.m - 1;
+      const y = prevM < 0 ? cursor.y - 1 : cursor.y;
+      const m = (prevM + 12) % 12;
+      gotoMonth(y, m);
     }
   };
 
   const goNext = () => {
     if (isWeekly) {
+      // 주간 (선택일+7일)
       const d = new Date(selected);
       d.setDate(d.getDate() + 7);
       setSelected(d);
       setCursor({ y: d.getFullYear(), m: d.getMonth() });
     } else {
-      setCursor(({ y, m }) => ({ y: y + (m + 1 > 11 ? 1 : 0), m: (m + 1) % 12 }));
+      // 월간 (다음 달로 가며 해당 달 1일 선택)
+      const nextM = cursor.m + 1;
+      const y = nextM > 11 ? cursor.y + 1 : cursor.y;
+      const m = nextM % 12;
+      gotoMonth(y, m);
     }
   };
 
   // 날짜 탭
   const onPressDay = (d: Date) => {
     setSelected(d);
-    if (cursor.y !== d.getFullYear() || cursor.m !== d.getMonth()) {
-      setCursor({ y: d.getFullYear(), m: d.getMonth() });
-    }
+    setCursor({ y: d.getFullYear(), m: d.getMonth() });
   };
 
   // 주간 달력 width 7칸 나누기
@@ -185,21 +190,10 @@ export default function CalendarScreen() {
     const w = e.nativeEvent.layout.width;
     requestAnimationFrame(() => setWeekRowWidth(w));
   };
-  const weekColStyle = useMemo(
-    () => ({ width: weekRowWidth > 0 ? weekRowWidth / 7 : undefined }),
-    [weekRowWidth]
-  );
+  const weekColStyle = useMemo(() => ({ width: weekRowWidth > 0 ? weekRowWidth / 7 : undefined }), [weekRowWidth]);
 
   // 달력 셀
-  const DayCell = ({
-    cell,
-    index,
-    monthly,
-  }: {
-    cell: Cell;
-    index: number;
-    monthly: boolean;
-  }) => {
+  const DayCell = ({ cell, index, monthly }: { cell: Cell; index: number; monthly: boolean }) => {
     const dow = index % 7;
     const isToday = isSameYMD(cell.date, today);
     const isSelected = isSameYMD(cell.date, selected);
@@ -213,20 +207,16 @@ export default function CalendarScreen() {
         ]}
         onPress={() => onPressDay(cell.date)}
       >
-        <Text
-          style={[
-            styles.dayText,
-            !cell.inMonth && styles.outMonthText,
-            dow === 0 && { color: 'red' },
-            dow === 6 && { color: 'blue' },
-          ]}
-        >
-          {cell.date.getDate()}
-        </Text>
+        <Text style={[styles.dayText, !cell.inMonth && styles.outMonthText, dow === 0 && { color: 'red' }, dow === 6 && { color: 'blue' }]}>{cell.date.getDate()}</Text>
         {isToday && <View style={styles.todayDot} />}
       </Pressable>
     );
   };
+
+  // 헤더 타이틀
+  const headerTitle = useMemo(() => {
+    return `${monthYear.y}년 ${monthYear.m + 1}월`;
+  }, [monthYear]);
 
   return (
     <SafeAreaView style={styles.safe} edges={['top']}>
@@ -236,9 +226,7 @@ export default function CalendarScreen() {
           <Text style={styles.navArrow}>{'‹'}</Text>
         </Pressable>
 
-        <Text style={styles.title}>
-          {isWeekly ? `${cursor.y}년 ${cursor.m + 1}월` : `${cursor.y}년 ${cursor.m + 1}월`}
-        </Text>
+        <Text style={styles.title}>{headerTitle}</Text>
 
         <Pressable onPress={goNext} hitSlop={10} style={[styles.navBtn, { alignItems: 'flex-end' }]}>
           <Text style={styles.navArrow}>{'›'}</Text>
@@ -270,12 +258,10 @@ export default function CalendarScreen() {
             // 월간 달력
             <FlatList
               data={monthCells}
-              keyExtractor={(it: any) => it.date.toISOString()}
+              keyExtractor={(it) => it.date.toISOString()}
               numColumns={7}
               scrollEnabled={false}
-              renderItem={({ item, index }) => (
-                <DayCell cell={item} index={index} monthly={true} />
-              )}
+              renderItem={({ item, index }) => <DayCell cell={item} index={index} monthly={true} />}
               contentContainerStyle={styles.grid}
               columnWrapperStyle={{ flex: 1 }}
             />
@@ -306,15 +292,14 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     marginBottom: 8,
   },
-
   title: { fontSize: 18 },
 
   navBtn: { width: 72, justifyContent: 'center' },
-  navArrow: { fontSize: 35, textAlign: 'left' },
+  navArrow: { fontSize: 28, textAlign: 'left' },
 
   weekHeader: { flexDirection: 'row', paddingHorizontal: 6, marginBottom: 4 },
-  weekCell: { flex: 1, alignItems: 'center', justifyContent: 'center', height: 26 },
-  weekText: { fontSize: 15, color: 'black' },
+  weekCell: { flex: 1, alignItems: 'center', justifyContent: 'center', height: 24 },
+  weekText: { fontSize: 12, color: 'black' },
 
   gridWrapper: { overflow: 'hidden' },
   grid: { paddingHorizontal: 6 },
@@ -322,7 +307,6 @@ const styles = StyleSheet.create({
   weekRow: { flexDirection: 'row', paddingHorizontal: 6 },
   weekCol: { flex: 1 },
 
-  // 공통 셀
   cell: {
     height: ROW_HEIGHT - V_MARGIN * 2,
     alignItems: 'center',
@@ -330,7 +314,6 @@ const styles = StyleSheet.create({
     borderRadius: 10,
     marginVertical: V_MARGIN,
   },
-  
   cellMonth: { flex: 1 },
 
   outMonthCell: { opacity: 0.35 },
@@ -353,7 +336,6 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-
   handlePill: { width: 44, height: 4, borderRadius: 2, backgroundColor: '#ddd' },
 
   footer: { marginTop: 8, alignItems: 'center' },
